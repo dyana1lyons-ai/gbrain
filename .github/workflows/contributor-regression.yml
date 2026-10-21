@@ -12,11 +12,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: "backup"
+          - name: "validity"
             os: "ubuntu-latest"
-            ref: "e5fa65943b6d617fe77350d71cb3e8cbf28c8423"
-            tests: "test/backup-pglite-tar.test.ts test/agent-install-backup.serial.test.ts"
-            revert: "src/core/backup/snapshot.ts"
+            ref: "1984c694ccb6ca6ca1432dc015a377c78be42cc1"
+            tests: "test/managed-maintenance.test.ts"
+            revert: "src/core/cycle/phases/consolidate.ts"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
