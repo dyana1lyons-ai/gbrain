@@ -122,15 +122,17 @@ test('consolidate closes explicit remember replacement validity in its canonical
     const [replacement] = await engine.executeRaw<{ valid_from: Date }>('SELECT valid_from FROM facts WHERE id=$1', [Number(next.id)]);
     await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
     const preview = await runPhaseConsolidate(engine, { sourceId, dryRun: true });
-    expect(preview.details.supersession_validity).toMatchObject({ stamped: 1 });
     expect((await engine.executeRaw<{ valid_until: Date | null }>('SELECT valid_until FROM facts WHERE id=$1', [Number(first.id)]))[0].valid_until).toBeNull();
     const other = await runPhaseConsolidate(engine, { sourceId: 'default' });
-    expect(other.details.supersession_validity).toMatchObject({ stamped: 0 });
+    expect((await engine.executeRaw<{ valid_until: Date | null }>('SELECT valid_until FROM facts WHERE id=$1', [Number(first.id)]))[0].valid_until).toBeNull();
     const applied = await runPhaseConsolidate(engine, { sourceId });
-    expect(applied.details.supersession_validity).toMatchObject({ stamped: 1 });
     const [after] = await engine.executeRaw<{ expired_at: Date; valid_until: Date; superseded_by: number }>(
       'SELECT expired_at,valid_until,superseded_by FROM facts WHERE id=$1', [Number(first.id)]);
+    expect(after.valid_until).not.toBeNull();
     expect(new Date(after.valid_until).toISOString()).toBe(new Date(replacement.valid_from).toISOString());
+    expect(preview.details.supersession_validity).toMatchObject({ stamped: 1 });
+    expect(other.details.supersession_validity).toMatchObject({ stamped: 0 });
+    expect(applied.details.supersession_validity).toMatchObject({ stamped: 1 });
     expect(Number(after.superseded_by)).toBe(Number(next.id));
     const active = await engine.listFactsByEntity(sourceId, slug, { activeOnly: true });
     expect(active.map(f => f.id)).toEqual([Number(next.id)]);
