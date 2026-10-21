@@ -14,7 +14,7 @@ jobs:
         include:
           - name: "validity"
             os: "ubuntu-latest"
-            ref: "1984c694ccb6ca6ca1432dc015a377c78be42cc1"
+            ref: "42c812977cb30ad0b61d6cb92e5880460ef3e073"
             tests: "test/managed-maintenance.test.ts"
             revert: "src/core/cycle/phases/consolidate.ts"
     steps:
