@@ -1,0 +1,106 @@
+name: Contributor regression proof
+on:
+  push:
+    branches: ['codex/b258-proof']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: "roots"
+            os: "ubuntu-latest"
+            ref: "08713844f7c1d0e583074f4395a5bee7a2da204b"
+            tests: "test/persistence-root-refresh.test.ts"
+            revert: "src/core/persistence/filesystem-guard.ts src/core/persistence/root-registry.ts"
+          - name: "roots-macos"
+            os: "macos-latest"
+            ref: "08713844f7c1d0e583074f4395a5bee7a2da204b"
+            tests: "test/persistence-root-refresh.test.ts"
+            revert: "src/core/persistence/filesystem-guard.ts src/core/persistence/root-registry.ts"
+          - name: "storage"
+            os: "ubuntu-latest"
+            ref: "1dc1b4b7be3ce1e95b2f2c20731ccdee53261920"
+            tests: "test/storage-supabase.test.ts"
+            revert: "src/core/storage/supabase.ts"
+          - name: "backup"
+            os: "ubuntu-latest"
+            ref: "e5fa65943b6d617fe77350d71cb3e8cbf28c8423"
+            tests: "test/backup-pglite-tar.test.ts test/agent-install-backup.serial.test.ts"
+            revert: "src/core/backup/snapshot.ts"
+          - name: "zstd"
+            os: "ubuntu-latest"
+            ref: "da590f86529f3fad0d457c14dfecf95900be84bb"
+            tests: "test/transcripts-codex-zst.test.ts test/transcripts.test.ts"
+            revert: "src/commands/transcripts.ts src/core/transcripts/codex.ts src/core/transcripts/discover.ts"
+          - name: "coverage"
+            os: "ubuntu-latest"
+            ref: "020ed02ca0bf5a305a0e3aba62be7c9e5f979caa"
+            tests: "test/health-embed-coverage-deleted-pages.test.ts"
+            revert: "src/core/engine-sql/health.ts"
+          - name: "gmail"
+            os: "ubuntu-latest"
+            ref: "ef5ab1c1cf072caeba558e678d571b2e640f9563"
+            tests: "test/google-import-automated.test.ts test/google-render.test.ts test/google-source-materialize.test.ts"
+            revert: "src/core/google/google-render.ts src/core/google/google-source.ts src/core/google/source-config.ts src/core/google/sweep-shared.ts src/core/google/types.ts src/core/persistence/connector-identity.ts"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ matrix.ref }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: '1.4.3'
+      - name: Install public locked dependencies
+        id: install
+        run: bun install --frozen-lockfile --ignore-scripts > install.log 2>&1
+      - name: Typecheck exact candidate
+        id: types
+        run: bun run typecheck > typecheck.log 2>&1
+      - name: Synthetic candidate tests
+        id: tests
+        if: ${{ always() && steps.install.outcome == 'success' }}
+        env:
+          GBRAIN_HOME: ${{ runner.temp }}/contributor-brain
+        run: bun test ${{ matrix.tests }} > tests.log 2>&1
+      - name: Regression tests must fail with baseline product code
+        id: baseline
+        if: ${{ always() && steps.tests.outcome == 'success' }}
+        env:
+          GBRAIN_HOME: ${{ runner.temp }}/contributor-baseline-brain
+        run: |
+          git fetch origin ca965f7a7cd73d34874219e91deb63099a67a6c4 --depth=1
+          git restore --source=ca965f7a7cd73d34874219e91deb63099a67a6c4 -- ${{ matrix.revert }}
+          set +e
+          bun test ${{ matrix.tests }} > baseline.log 2>&1
+          code=$?
+          set -e
+          echo "baseline_exit=$code" >> baseline.log
+          if [ "$code" -eq 0 ]; then
+            echo 'The regression suite did not distinguish the baseline.'
+            exit 1
+          fi
+          if ! grep -Eq '[1-9][0-9]* fail|\(fail\)' baseline.log; then
+            echo 'Baseline failed without a discriminating test failure.'
+            exit 1
+          fi
+      - name: Retain complete logs and exact revision
+        if: ${{ always() }}
+        run: |
+          git rev-parse HEAD > exact-head.txt
+          bun --version > bun-version.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ always() }}
+        with:
+          name: regression-${{ matrix.name }}
+          path: |
+            install.log
+            typecheck.log
+            tests.log
+            baseline.log
+            exact-head.txt
+            bun-version.txt
