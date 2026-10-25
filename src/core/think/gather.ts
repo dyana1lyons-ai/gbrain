@@ -31,6 +31,7 @@ import { sanitizeQueryForPrompt } from '../search/expansion.ts';
 import { ensureWellFormed } from '../text-safe.ts';
 import { CJK_SLUG_CHARS } from '../cjk.ts';
 import type { IntentAsk } from '../search/decide-retrieval.ts';
+import { moneyAnswerOffset } from './money-excerpt.ts';
 
 export interface ThinkGatherOpts {
   question: string;
@@ -498,6 +499,11 @@ export function selectRelevantExcerptDetailed(
   }
   if (content.length <= excerptLen) {
     return { text: ensureWellFormed(content), truncatedStart: false, truncatedEnd: false };
+  }
+
+  const moneyOffset = moneyAnswerOffset(content, query);
+  if (moneyOffset !== null) {
+    return excerptWindow(content, Math.max(0, moneyOffset - Math.floor(excerptLen / 2)), excerptLen);
   }
 
   const uniqueTerms = Array.from(new Set(
