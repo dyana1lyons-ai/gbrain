@@ -36,3 +36,15 @@ test('failed and budget-exhausted reads remain unknown, and thin clients do no e
   expect(chat(await effectiveReadiness(engine(async () => new Promise(() => {})), config, 'http', 5))).toMatchObject({ state: 'unknown', reason: 'probe_timeout' });
   expect(chat(await effectiveReadiness(engine(async () => { throw new Error('must not read'); }), { ...config, remote_mcp: { mcp_url: 'https://example.invalid/mcp' } } as GBrainConfig, 'http'))).toMatchObject({ state: 'not_applicable', reason: 'remote_brain' });
 });
+
+import { sourcesOperations } from '../src/core/ops/sources.ts';
+import type { OperationContext } from '../src/core/operations.ts';
+test('the real whoami operation reports the engine route to a local caller', async () => {
+  await withEnv({ ...noKeys, GBRAIN_MODEL: undefined }, async () => {
+    configureGateway({ env: {} });
+    const db = engine(async key => key === 'facts.extraction_model' ? 'ollama:example' : null);
+    const whoami = sourcesOperations.find(op => op.name === 'whoami')!;
+    const result = await whoami.handler({ engine: db, config, remote: false } as OperationContext, {}) as { readiness: Awaited<ReturnType<typeof effectiveReadiness>> };
+    expect(chat(result.readiness)).toMatchObject({ state: 'ok', reason: 'configured', tier: 'probed' });
+  });
+});
