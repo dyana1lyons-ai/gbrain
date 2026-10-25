@@ -1,4 +1,4 @@
-import { beforeAll, afterAll, expect, test } from 'bun:test';
+import { beforeAll, afterAll, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, renameSync, mkdirSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
@@ -19,6 +19,8 @@ import { isQuarantined } from '../src/core/quarantine.ts';
 import { discoverExtractablePages, countExtractAtomsBacklog } from '../src/core/cycle/extract-atoms.ts';
 import { withEnv } from './helpers/with-env.ts';
 
+const exitSpy = spyOn(process, 'exit').mockImplementation((code) => { throw new Error(`unexpected CLI exit: ${code}`); });
+afterAll(() => exitSpy.mockRestore());
 const home = mkdtempSync(join(tmpdir(), 'owner-quarantine-'));
 let engine: PGLiteEngine;
 const env = { GBRAIN_HOME: home, GBRAIN_AUDIT_DIR: home, GBRAIN_SELF_UPGRADE_MODE: 'off', OPENAI_API_KEY: undefined, ANTHROPIC_API_KEY: undefined };
