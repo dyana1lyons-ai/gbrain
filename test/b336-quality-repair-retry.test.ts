@@ -1,22 +1,22 @@
 import { expect, test } from 'bun:test';
-import { incompleteRetryTarget } from '../src/core/cycle/nightly-quality-probe.ts';
+import * as nightlyQuality from '../src/core/cycle/nightly-quality-probe.ts';
 const now = new Date('2026-10-22T07:01:00Z');
 const event = { ts: '2026-10-21T22:00:00Z', outcome: 'error' };
 test('repair admits one incomplete attempt without erasing its original audit identity', () => {
   for (const outcome of ['error', 'budget_exceeded', 'inconclusive'])
-    expect(incompleteRetryTarget(now, [{ ...event, outcome }])).toBe(event.ts);
+    expect(nightlyQuality.incompleteRetryTarget(now, [{ ...event, outcome }])).toBe(event.ts);
 });
 test('completed pass and fail remain gated, including a completed older run', () => {
   for (const outcome of ['pass', 'fail']) {
-    expect(incompleteRetryTarget(now, [{ ...event, outcome }])).toBeUndefined();
-    expect(incompleteRetryTarget(now, [{ ...event, ts: '2026-10-21T21:00:00Z', outcome }, event])).toBeUndefined();
+    expect(nightlyQuality.incompleteRetryTarget(now, [{ ...event, outcome }])).toBeUndefined();
+    expect(nightlyQuality.incompleteRetryTarget(now, [{ ...event, ts: '2026-10-21T21:00:00Z', outcome }, event])).toBeUndefined();
   }
 });
 test('second repair, unknown outcome, stale event and future timestamp cannot lift a gate', () => {
-  expect(incompleteRetryTarget(now, [{ ...event, retry_of: 'original' }])).toBeUndefined();
-  expect(incompleteRetryTarget(now, [{ ...event, outcome: 'skipped' }])).toBeUndefined();
-  expect(incompleteRetryTarget(now, [{ ...event, ts: '2026-10-20T22:00:00Z' }])).toBeUndefined();
-  expect(incompleteRetryTarget(now, [{ ...event, ts: '2026-10-23T22:00:00Z' }])).toBeUndefined();
+  expect(nightlyQuality.incompleteRetryTarget(now, [{ ...event, retry_of: 'original' }])).toBeUndefined();
+  expect(nightlyQuality.incompleteRetryTarget(now, [{ ...event, outcome: 'skipped' }])).toBeUndefined();
+  expect(nightlyQuality.incompleteRetryTarget(now, [{ ...event, ts: '2026-10-20T22:00:00Z' }])).toBeUndefined();
+  expect(nightlyQuality.incompleteRetryTarget(now, [{ ...event, ts: '2026-10-23T22:00:00Z' }])).toBeUndefined();
 });
 
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
