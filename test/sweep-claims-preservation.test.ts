@@ -33,3 +33,29 @@ test('ordinary native cleanup stays compatible when preservation is not selected
   expect(await releaseCorpusClaim('/private/claim', false, io as any)).toBe(true);
   expect(calls).toEqual([['/private/claim', { force: true }]]);
 });
+
+import { acquireCorpusClaim } from '../src/core/sweep.ts';
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, readFileSync, readdirSync, renameSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
+import { withEnv } from './helpers/with-env.ts';
+test('native stale-claim reacquisition preserves the previous bytes when selected', async () => {
+  const realHome = homedir();
+  const dir = mkdtempSync(join(tmpdir(), 'stale-claim-proof-'));
+  const claim = join(dir, 'synthetic.in-progress');
+  const previous = 'synthetic predecessor claim';
+  writeFileSync(claim, previous);
+  utimesSync(claim, new Date('2000-01-01'), new Date('2000-01-01'));
+  try {
+    await withEnv({ GBRAIN_SWEEP_PRESERVE_CLAIMS: '1', HOME: dir }, async () => {
+      expect(await acquireCorpusClaim(claim)).toBe(true);
+      expect(JSON.parse(readFileSync(claim, 'utf8')).pid).toBe(process.pid);
+      const preserved = readdirSync(join(dir, '.Trash'));
+      expect(preserved).toHaveLength(1);
+      expect(readFileSync(join(dir, '.Trash', preserved[0]), 'utf8')).toBe(previous);
+    });
+  } finally {
+    const trash = join(realHome, '.Trash'); mkdirSync(trash, { recursive: true });
+    renameSync(dir, join(trash, 'stale-claim-proof-' + randomUUID()));
+  }
+});
