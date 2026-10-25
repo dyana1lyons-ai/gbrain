@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { importFromContent } from '../src/core/import-file.ts';
-import { contentFlagOnlyImport } from '../src/core/page-state/import-guard.ts';
+import * as importGuard from '../src/core/page-state/import-guard.ts';
 import { maintenanceTransaction } from '../src/core/persistence/attribution.ts';
 
 const slug = 'decisions/household/example';
@@ -46,12 +46,12 @@ test('B208: diagnostic exception cannot hide source or security changes', async 
     await importFromContent(engine, slug, content, { noEmbed: true, writeGate: { tier: 'unknown' } });
     const existing = (await engine.getPage(slug))!;
     const parsed = { ...existing, tags: [], frontmatter: { ...existing.frontmatter, content_flag: { reason: 'instruction_like', detail: 'new diagnostic' } } };
-    expect(await contentFlagOnlyImport(engine, existing, [], parsed, 'default')).toBe(true);
+    expect(await importGuard.contentFlagOnlyImport(engine, existing, [], parsed, 'default')).toBe(true);
     for (const change of [
       { title: 'A new title' }, { compiled_truth: existing.compiled_truth + ' Changed.' }, { timeline: 'New event' },
       { type: 'person' }, { tags: ['new-tag'] },
       ...['trust_tier', 'quarantine', 'embed_skip', 'custom'].map(key => ({ frontmatter: { ...parsed.frontmatter, [key]: 'changed' } })),
-    ]) expect(await contentFlagOnlyImport(engine, existing, [], { ...parsed, ...change }, 'default')).toBe(false);
-    expect(await contentFlagOnlyImport(engine, { ...existing, deleted_at: new Date() }, [], parsed, 'default')).toBe(false);
+    ]) expect(await importGuard.contentFlagOnlyImport(engine, existing, [], { ...parsed, ...change }, 'default')).toBe(false);
+    expect(await importGuard.contentFlagOnlyImport(engine, { ...existing, deleted_at: new Date() }, [], parsed, 'default')).toBe(false);
   } finally { await engine.disconnect(); }
 }, 120_000);
