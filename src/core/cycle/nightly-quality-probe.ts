@@ -28,6 +28,8 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
+import { homedir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 
 import {
   logQualityProbeEvent,
@@ -505,7 +507,7 @@ export async function runNightlyQualityProbe(deps: NightlyProbeDeps): Promise<Ni
     return { outcome, exit_code: 1, detail };
   } finally {
     try {
-      fs.rmSync(workDir, { recursive: true, force: true });
+      recoverableProbeCleanup(workDir);
     } catch { /* best-effort */ }
   }
 }
@@ -554,11 +556,19 @@ function keepReceipts(workDir: string, now: Date): Partial<QualityProbeAuditEven
     for (const f of files) fs.copyFileSync(path.join(workDir, f), path.join(dir, f));
     const kept = fs.readdirSync(root).sort();
     for (const old of kept.slice(0, Math.max(0, kept.length - RECEIPTS_KEPT))) {
-      fs.rmSync(path.join(root, old), { recursive: true, force: true });
+      recoverableProbeCleanup(path.join(root, old));
     }
     return { receipt_dir: dir };
   } catch (err) {
     process.stderr.write(`[nightly-quality-probe] could not keep the run's receipts: ${err instanceof Error ? err.message : String(err)}\n`);
     return {};
   }
+}
+
+/** Keep probe scratch and retired receipts recoverable. A failed move retains the source. */
+export function recoverableProbeCleanup(directory: string): void {
+  if (!fs.existsSync(directory)) return;
+  const trash = path.join(homedir(), '.Trash');
+  fs.mkdirSync(trash, { recursive: true, mode: 0o700 });
+  fs.renameSync(directory, path.join(trash, `gbrain-quality-${path.basename(directory)}-${randomUUID()}`));
 }
