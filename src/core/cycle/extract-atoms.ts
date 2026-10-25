@@ -163,14 +163,15 @@ const pageScanStateExclusionSql = (maxInputChars?: string) => `AND NOT EXISTS (
 )`;
 const PAGE_SCAN_STATE_EXCLUSION_SQL = pageScanStateExclusionSql();
 
-async function atomDiscoveryFilters(engine: BrainEngine, maxInputChars?: string): Promise<{ scan: string; managed: string }> {
+async function atomDiscoveryFilters(engine: BrainEngine, maxInputChars?: string): Promise<{ scan: string; managed: string; usesCap: boolean }> {
   let chunked = false;
   try { chunked = await engine.getConfig('cycle.extract_atoms.chunk_long_inputs') === 'true'; } catch { /* conservative default */ }
   return chunked ? {
+    usesCap: false,
     scan: PAGE_SCAN_STATE_EXCLUSION_SQL.replace('(scan.tombstoned OR scan.partial_input_chars IS NOT NULL)', 'scan.tombstoned'),
     managed: MANAGED_ATOM_DISCOVERY_SQL.replace("ac.completed_keys->0->>'failure' IS NULL OR ac.completed_keys->0->>'held'='true'",
       "(ac.completed_keys->0->>'failure' IS NULL AND ac.completed_keys->0->>'partial' IS NULL) OR ac.completed_keys->0->>'held'='true'"),
-  } : { scan: pageScanStateExclusionSql(maxInputChars), managed: managedAtomDiscoverySql(maxInputChars) };
+  } : { scan: pageScanStateExclusionSql(maxInputChars), managed: managedAtomDiscoverySql(maxInputChars), usesCap: maxInputChars !== undefined };
 }
 
 /**
@@ -512,6 +513,7 @@ export async function countExtractAtomsBacklog(
     // brain-wide form keys the NOT EXISTS on `atom.source_id = p.source_id`.
     const scoped = sourceId !== undefined;
     const connectorExclusion = await connectorAtomExclusionSql(engine);
+    const filters = await atomDiscoveryFilters(engine, scoped ? '$4::integer' : '$3::integer');
     const sql = scoped
       ? `SELECT COUNT(*) AS cnt FROM pages p
          WHERE p.source_id = $1
@@ -522,8 +524,8 @@ export async function countExtractAtomsBacklog(
            AND COALESCE(p.frontmatter->>'dream_generated', '') <> 'true'
            ${RAW_SOURCE_HOLDER_EXCLUSION_SQL}
            AND ${minCompiledTruthChars('$3')}
-           ${(await atomDiscoveryFilters(engine, '$4::integer')).managed}
-           ${(await atomDiscoveryFilters(engine, '$4::integer')).scan}
+           ${filters.managed}
+           ${filters.scan}
            ${connectorExclusion}
            AND NOT EXISTS (
              SELECT 1 FROM pages atom
@@ -540,8 +542,8 @@ export async function countExtractAtomsBacklog(
            AND COALESCE(p.frontmatter->>'dream_generated', '') <> 'true'
            ${RAW_SOURCE_HOLDER_EXCLUSION_SQL}
            AND ${minCompiledTruthChars('$2')}
-           ${(await atomDiscoveryFilters(engine, '$3::integer')).managed}
-           ${(await atomDiscoveryFilters(engine, '$3::integer')).scan}
+           ${filters.managed}
+           ${filters.scan}
            ${connectorExclusion}
            AND NOT EXISTS (
              SELECT 1 FROM pages atom
@@ -553,8 +555,8 @@ export async function countExtractAtomsBacklog(
     const extractableTypes = await resolveExtractableTypes();
     const maxInputChars = await resolveExtractAtomsInputCap(engine);
     const params = scoped
-      ? [sourceId, extractableTypes, MIN_PAGE_CHARS_FOR_EXTRACTION, maxInputChars]
-      : [extractableTypes, MIN_PAGE_CHARS_FOR_EXTRACTION, maxInputChars];
+      ? [sourceId, extractableTypes, MIN_PAGE_CHARS_FOR_EXTRACTION, ...(filters.usesCap ? [maxInputChars] : [])]
+      : [extractableTypes, MIN_PAGE_CHARS_FOR_EXTRACTION, ...(filters.usesCap ? [maxInputChars] : [])];
     const rows = await engine.executeRaw<{ cnt: string | number }>(sql, params, { signal: opts.signal });
     return Number(rows[0]?.cnt ?? 0);
   } catch (err) {
