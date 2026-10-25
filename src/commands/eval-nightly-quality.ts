@@ -6,13 +6,13 @@ import { runNightlyQualityProbeStep } from './autopilot-probes.ts';
 import type { NightlyProbeResult } from '../core/cycle/nightly-quality-probe.ts';
 
 export async function runEvalNightlyQuality(engine: BrainEngine, args: string[], probe?: () => Promise<NightlyProbeResult>): Promise<void> {
-  if (args.some(arg => !['--json', '--help', '-h'].includes(arg))) {
-    console.error('Usage: gbrain eval nightly-quality [--json]');
+  if (args.some(arg => !['--json', '--help', '-h', '--retry-incomplete'].includes(arg))) {
+    console.error('Usage: gbrain eval nightly-quality [--json] [--retry-incomplete]');
     setCliExitVerdict(2);
     return;
   }
   if (args.includes('--help') || args.includes('-h')) {
-    console.log('gbrain eval nightly-quality [--json]: existing opt-in probe, existing daily cap and 24-hour gate; no autopilot tick.');
+    console.log('gbrain eval nightly-quality [--json] [--retry-incomplete]: existing opt-in probe, existing daily cap and 24-hour gate; no autopilot tick.');
     return;
   }
   // Nested eval commands print their own reports. This process owns stdout;
@@ -24,7 +24,7 @@ export async function runEvalNightlyQuality(engine: BrainEngine, args: string[],
     (process.stderr.write as (...values: unknown[]) => boolean)(chunk, ...rest)) as typeof process.stdout.write;
   let result: NightlyProbeResult;
   try {
-    result = await (probe ? probe() : runNightlyQualityProbeStep(engine, await loadConfigWithEngine(engine)));
+    result = await (probe ? probe() : runNightlyQualityProbeStep(engine, await loadConfigWithEngine(engine), args.includes('--retry-incomplete')));
   } finally {
     process.stdout.write = write;
     console.log = log;

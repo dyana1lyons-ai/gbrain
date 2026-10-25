@@ -24,7 +24,7 @@ export async function resolveNightlyProbeModelRoutesForDaemon(engine: BrainEngin
   return resolveNightlyProbeModelRoutes(engine);
 }
 
-export async function runNightlyQualityProbeStep(engine: BrainEngine, cfg: GBrainConfig | null): Promise<NightlyProbeResult> {
+export async function runNightlyQualityProbeStep(engine: BrainEngine, cfg: GBrainConfig | null, retryIncomplete = false): Promise<NightlyProbeResult> {
   // 4.5 — Nightly quality probe (v0.41).
   // Per D10: trust the phase's internal 24h rate-limit (via shouldRunNightly
   // reading the audit JSONL). No scheduler-side precheck — one source of
@@ -53,6 +53,7 @@ export async function runNightlyQualityProbeStep(engine: BrainEngine, cfg: GBrai
       const { isAvailable } = await import('../core/ai/gateway.ts');
       const cap = resolveProbeCap(dbMaxUsd, cfg?.autopilot?.nightly_quality_probe?.max_usd);
       return await runNightlyQualityProbe({
+        retryIncomplete,
         isEnabled: () => true, // already gated above; phase re-checks for defense-in-depth
         hasEmbeddingProvider: () => isAvailable('embedding'),
         resolveMaxUsd: () => cap.maxUsd,

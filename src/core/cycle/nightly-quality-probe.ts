@@ -85,9 +85,12 @@ export interface NightlyProbeResult {
   outcome: 'pass' | 'fail' | 'inconclusive' | 'error' | 'budget_exceeded' | 'rate_limited' | 'no_embedding_key' | 'skipped' | 'disabled';
   exit_code: number;
   detail?: string;
+  questions?: Array<{ question_id: string; verdict: string }>;
 }
 
 export interface NightlyProbeDeps {
+  /** Explicit repair retry; never used by the automatic daemon. */
+  retryIncomplete?: boolean;
   /** Returns true when the feature config flag is on. */
   isEnabled: () => boolean | Promise<boolean>;
   /** Returns true when an embedding provider is configured + reachable. */
@@ -219,6 +222,17 @@ export function shouldRunNightly(
   return { run: true };
 }
 
+/** One repair retry of an incomplete original run; completed verdicts stay gated. */
+export function incompleteRetryTarget(now: Date, events: ReadonlyArray<{ ts: string; outcome?: string; retry_of?: string }>): string | undefined {
+  const cutoff = now.getTime() - NIGHTLY_WINDOW_MS;
+  const recent = events.filter(e => Date.parse(e.ts) >= cutoff)
+    .sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts));
+  if (recent.some(e => e.outcome === 'pass' || e.outcome === 'fail' || e.retry_of)) return undefined;
+  const latest = recent[0];
+  if (!latest || Date.parse(latest.ts) > now.getTime() || !['error', 'budget_exceeded', 'inconclusive'].includes(latest.outcome ?? '')) return undefined;
+  return latest.ts;
+}
+
 function sha8File(p: string): string | undefined {
   try {
     const content = fs.readFileSync(p);
@@ -317,7 +331,8 @@ export async function runNightlyQualityProbe(deps: NightlyProbeDeps): Promise<Ni
   const now = deps.now();
   const recent = readRecentQualityProbeEvents(2, now); // 2-day window is enough for 24h check
   const decision = shouldRunNightly(now, recent);
-  if (!decision.run) {
+  const retryOf = !decision.run && deps.retryIncomplete ? incompleteRetryTarget(now, recent) : undefined;
+  if (!decision.run && !retryOf) {
     return { outcome: 'rate_limited', exit_code: 0, detail: 'already ran within 24h' };
   }
 
@@ -379,7 +394,7 @@ export async function runNightlyQualityProbe(deps: NightlyProbeDeps): Promise<Ni
   let modelRoutes: NightlyProbeModelRoutes | undefined;
   let meter: ChatCallMeter | undefined;
   let tracker: ProbeBudgetTracker | undefined;
-  let capFields: Partial<QualityProbeAuditEvent> = {};
+  let capFields: Partial<QualityProbeAuditEvent> = retryOf ? { retry_of: retryOf } : {};
   const stopped = (): Partial<QualityProbeAuditEvent> => {
     if (!tracker?.exhausted) return {};
     const reason = tracker.exhausted.reason;
@@ -408,7 +423,7 @@ export async function runNightlyQualityProbe(deps: NightlyProbeDeps): Promise<Ni
       capSource: policy.capSource,
       ...(policy.pricingOverrides ? { pricingOverrides: policy.pricingOverrides } : {}),
     });
-    capFields = { cap_usd: maxUsd, cap_source: policy.capSource };
+    capFields = { ...capFields, cap_usd: maxUsd, cap_source: policy.capSource };
     const runTracker = tracker;
     meter = { calls: 0, cost_usd: 0, unpriced_calls: 0, ...(policy.pricingOverrides ? { pricing_overrides: policy.pricingOverrides } : {}) };
     const runMeter = meter;
@@ -479,10 +494,11 @@ export async function runNightlyQualityProbe(deps: NightlyProbeDeps): Promise<Ni
       ...(failures?.length ? { failures: failures.slice(0, AUDIT_MAX_FAILURES) } : {}),
       ...spendFields(runMeter),
       ...capFields,
+      ...(summary?.questions ? { questions: summary.questions } : {}),
       ...(outcome !== 'pass' ? keepReceipts(workDir, deps.now()) : {}),
     });
 
-    return { outcome, exit_code: exitCode, ...(detail ? { detail } : {}) };
+    return { outcome, exit_code: exitCode, ...(detail ? { detail } : {}), ...(summary?.questions ? { questions: summary.questions } : {}) };
   } catch (err) {
     const budget = stopped();
     const outcome = budget.reason ? 'budget_exceeded' : 'error';
