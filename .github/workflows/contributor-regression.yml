@@ -1,0 +1,73 @@
+name: B349 contributor regression proof
+on:
+  push:
+    branches: ['codex/b349-proof']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include: [{"name": "16-withdrawal-budget", "ref": "68ac8a3b773fe4d77d6c191aa881aa3a65379191", "tests": "test/withdrawal-budget.test.ts", "revert": "src/core/config-runtime-keys.ts src/core/facts/withdrawal-discovery.ts src/core/facts/withdrawal.ts src/core/persistence/memory-mutations.ts"}, {"name": "18-managed-tree-unindexed-applicability", "ref": "ef6b0cf22ec3f2aff48a873e8fc2e776feb44910", "tests": "test/unindexed-source-applicability.test.ts", "revert": "src/core/cycle/unindexed-files.ts src/core/persistence/sync-discovery.ts"}, {"name": "19-engine-chat-readiness", "ref": "ca181c319df9077eea5c9edb6e6f68ee1b443f2a", "tests": "test/effective-readiness.test.ts", "revert": "src/core/harness/capabilities.ts src/core/ops/sources.ts src/core/readiness.ts"}, {"name": "20-compiled-supervisor-detach", "ref": "797a0e596f054f1534c8ce0b85e277aa85bfe4a1", "tests": "test/detached-supervisor-invocation.test.ts", "revert": "src/core/minions/detached-stderr.ts"}, {"name": "23-nightly-probe-reservation-order", "ref": "577572c83f035db680efe0dd1a971c02b5d4c437", "tests": "test/b336-nightly-budget-concurrency.test.ts test/cycle/nightly-probe-adapters.test.ts", "revert": "src/core/cycle/nightly-probe-adapters.ts"}, {"name": "24-canonical-image-read-without-writeback", "ref": "43f1bffe5dc6672be13c7c6f502b888f413b1d1d", "tests": "test/persistence-image-import.serial.test.ts", "revert": "src/core/persistence/import-prepare.ts src/core/persistence/page-mutations.ts"}, {"name": "28-legacy-publisher-http-surface", "ref": "f3aace00e36c9db3c08194e51c56d944ce511ece", "tests": "test/legacy-http-publisher-surface.test.ts", "revert": "src/commands/serve-http-mcp.ts"}, {"name": "29-sweep-claims-preservation", "ref": "05c86e24c3ea28c53cd63fbb4b8143d081964433", "tests": "test/sweep-claims-preservation.test.ts", "revert": "src/core/sweep.ts"}, {"name": "30-nightly-fixture-reference-date", "ref": "43a2f410b92cb8fcf1ee6e0513756a9843ffe285", "tests": "test/nightly-fixture-reference-date.test.ts", "revert": ""}, {"name": "32-lint-artifact-provenance", "ref": "ad67749be705c6d4ca2c759260451025ad200aee", "tests": "test/lint-artifact-provenance.test.ts", "revert": "src/commands/lint.ts"}, {"name": "34-keyword-page-index-fence", "ref": "36bd73d504d3d0efdebdad98e05e05caaee53333", "tests": "test/supa5-keyword-fence.test.ts", "revert": "src/core/search/keyword-statement.ts"}, {"name": "37-think-money-answer-excerpt", "ref": "a8b29fec84e8495b93600027a999119bf8a8c69d", "tests": "test/think-money-excerpt.test.ts", "revert": "src/core/think/gather.ts"}, {"name": "38-interactive-source-priority", "ref": "c0dd92850587a3314c8a3c477717c10c4c4e8896", "tests": "test/persistence-interactive-priority.test.ts", "revert": "src/core/persistence/consumer.ts src/core/persistence/journal.ts"}, {"name": "39-concept-publication-wait", "ref": "ed2b0f4085f1d24849ab3f07ceaf932a69ec0a90", "tests": "test/b336-concept-publish-wait.test.ts test/maintenance-write-wait.test.ts", "revert": "src/core/cycle/synthesize-concepts.ts src/core/persistence/maintenance-wait.ts src/core/persistence/prepared-maintenance.ts"}]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ matrix.ref }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: '1.4.3'
+      - name: Install public locked dependencies
+        id: install
+        run: bun install --frozen-lockfile --ignore-scripts > install.log 2>&1
+      - name: Typecheck exact candidate
+        id: types
+        run: bun run typecheck > typecheck.log 2>&1
+      - name: Run synthetic candidate tests
+        id: tests
+        if: ${{ always() && steps.install.outcome == 'success' }}
+        env:
+          GBRAIN_HOME: ${{ runner.temp }}/candidate-brain
+          GBRAIN_SELF_UPGRADE_MODE: 'off'
+        run: env -u DATABASE_URL -u GBRAIN_DATABASE_URL bun test --max-concurrency=1 --timeout=120000 ${{ matrix.tests }} > tests.log 2>&1
+      - name: Require an executed regression failure with baseline product code
+        id: baseline
+        if: ${{ always() && steps.tests.outcome == 'success' }}
+        env:
+          GBRAIN_HOME: ${{ runner.temp }}/baseline-brain
+          GBRAIN_SELF_UPGRADE_MODE: 'off'
+        run: |
+          git fetch https://github.com/garrytan/gbrain.git 9689b047037df8fe1ad4f122b36f9ca0e50230c9 --depth=1
+          git restore --source=9689b047037df8fe1ad4f122b36f9ca0e50230c9 -- ${{ matrix.revert }}
+          set +e
+          env -u DATABASE_URL -u GBRAIN_DATABASE_URL bun test --max-concurrency=1 --timeout=120000 ${{ matrix.tests }} > baseline.log 2>&1
+          code=$?
+          set -e
+          echo "baseline_exit=$code" >> baseline.log
+          python3 - <<'PY_CHECK'
+          import pathlib,re
+          text=pathlib.Path('baseline.log').read_text()
+          failed=re.search(r'(^|\n)\s*[1-9][0-9]* fail',text)
+          crashed=re.search(r'(^|\n)\s*[1-9][0-9]* error',text)
+          assert failed and not crashed, 'Baseline discrimination NOT_PROVEN; missing imports and crashes do not count'
+          PY_CHECK
+      - name: Retain complete logs and exact revision
+        if: ${{ always() }}
+        run: |
+          git rev-parse HEAD > exact-head.txt
+          bun --version > bun-version.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ always() }}
+        with:
+          name: regression-${{ matrix.name }}
+          path: |
+            install.log
+            typecheck.log
+            tests.log
+            baseline.log
+            exact-head.txt
+            bun-version.txt
