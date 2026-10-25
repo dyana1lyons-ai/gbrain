@@ -22,7 +22,6 @@
 import { describe, test, expect } from 'bun:test';
 import {
   runPhaseGradeTakes,
-  runConfiguredPhaseGradeTakes,
   defaultJudge,
   parseJudgeOutput,
   evidenceSignature,
@@ -31,6 +30,7 @@ import {
   type JudgeFn,
   type EvidenceRetrieverFn,
 } from '../src/core/cycle/grade-takes.ts';
+import * as gradeTakes from '../src/core/cycle/grade-takes.ts';
 import { readGradeTakesPolicy } from '../src/core/cycle/grade-takes-policy.ts';
 import type { OperationContext } from '../src/core/operations.ts';
 import type { BrainEngine, Take, TakeResolution } from '../src/core/engine.ts';
@@ -548,7 +548,7 @@ describe('native cycle operator policy', () => {
     test(`review-only when opt-in is ${String(value)}`, async () => {
       const {engine, resolves, captured} = buildMockEngine({takes:[buildTake({id:71,sinceDate:'2020-01-01'})], config:value===undefined?{}:{'cycle.grade_takes.auto_resolve.enabled':value}});
       const policy=await readGradeTakesPolicy(engine);
-      const result=await runConfiguredPhaseGradeTakes(buildCtx(engine),{judge:async()=>({verdict:'correct',confidence:0.99,reasoning:'dated outcome evidence'}),evidenceRetriever:async()=> 'Outcome recorded 2025-01-01.'});
+      const result=await gradeTakes.runConfiguredPhaseGradeTakes(buildCtx(engine),{judge:async()=>({verdict:'correct',confidence:0.99,reasoning:'dated outcome evidence'}),evidenceRetriever:async()=> 'Outcome recorded 2025-01-01.'});
       expect(policy.autoResolve).toBe(false);
       expect((result.details as Record<string, unknown>).auto_applied).toBe(0);
       expect(resolves).toHaveLength(0);
@@ -560,7 +560,7 @@ describe('native cycle operator policy', () => {
       const {engine,resolves}=buildMockEngine({takes:[buildTake({id:81,sinceDate:'2020-01-01'}),buildTake({id:82,sinceDate:'2020-01-01'}),buildTake({id:83,sinceDate:'2020-01-01'})],config:{'cycle.grade_takes.auto_resolve.enabled':value,'models.dream.grade_takes':'claude-cli:claude-sonnet-5-5'}});
       const policy=await readGradeTakesPolicy(engine);
       expect(policy.model).toBe('claude-cli:claude-sonnet-5-5');
-      const result=await runConfiguredPhaseGradeTakes(buildCtx(engine),{judge:async({take})=>({verdict:take.id===83?'unresolvable':'correct',confidence:take.id===82?0.94:0.99,reasoning:'dated outcome evidence'}),evidenceRetriever:async()=> 'Outcome recorded 2025-01-01.'});
+      const result=await gradeTakes.runConfiguredPhaseGradeTakes(buildCtx(engine),{judge:async({take})=>({verdict:take.id===83?'unresolvable':'correct',confidence:take.id===82?0.94:0.99,reasoning:'dated outcome evidence'}),evidenceRetriever:async()=> 'Outcome recorded 2025-01-01.'});
       expect((result.details as Record<string, unknown>).auto_resolve).toBe(true);
       expect((result.details as Record<string, unknown>).auto_resolve_threshold).toBe(0.95);
       expect((result.details as Record<string, unknown>).auto_applied).toBe(1);
