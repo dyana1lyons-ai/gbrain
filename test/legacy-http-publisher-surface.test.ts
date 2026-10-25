@@ -60,7 +60,7 @@ test('legacy full host retains exact operations and source grants with an OAuth 
   expect(names).toContain('add_link');
   expect(names).not.toContain('put_page');
   const called = await rpc(base, token, 'tools/call', { name: 'add_link', arguments: linkArgs });
-  expect(JSON.parse(called.content[0].text)).toMatchObject({ dry_run: true, action: 'add_link', from_source_id: 'default', to_source_id: 'default' });
+  expect(JSON.parse(called.content[0].text)).toMatchObject({ dry_run: true, action: 'add_link', from: linkArgs.from, to: linkArgs.to });
   const denied = await rpc(base, token, 'tools/call', { name: 'put_page', arguments: { slug: 'not-permitted', content: '# Not permitted' } });
   expect(denied.isError).toBe(true);
   expect(await engine.getPage('not-permitted', { sourceId: 'default' })).toBeNull();
