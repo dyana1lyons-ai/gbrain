@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: [{"name": "transcripts", "ref": "b9a0875686fa982b513e805a89e86805e1363c75", "tests": "test/transcripts-codex-record-provenance.test.ts test/codex-hook-lane.test.ts test/codex-hook-lane-archived.test.ts test/transcript-adapters.test.ts test/transcripts-codex-subagent.test.ts test/transcripts-recover-codex.test.ts test/codex-rollout-0154.serial.test.ts test/claude-code-jsonl.test.ts", "baseline_tests": "test/transcripts-codex-record-provenance.test.ts", "revert": "src/core/transcripts/codex.ts src/core/transcripts/codex-hook-lane.ts src/core/transcripts/claude-code-jsonl.ts src/core/context/entity-salience.ts"}, {"name": "maintenance", "ref": "b373f399b523782c203877a9dba04f9d489d648e", "tests": "test/dream-bounded-phases.test.ts test/extract-facts-concurrency.test.ts test/extract-facts-concurrency-walk.serial.test.ts test/cycle-last-full-cycle-at.test.ts test/cycle-stamp-write-failure.test.ts test/dream-dir-source-stamp.test.ts test/dream-env-source-scope.test.ts test/dream.test.ts test/cycle-consolidate.test.ts test/cycle-consolidate-enabled-6667.test.ts test/cycle-consolidate-threshold-5363.test.ts test/extract-facts-phase.test.ts test/extract-facts-poison-page.test.ts", "baseline_tests": "test/dream-bounded-phases.test.ts", "revert": "src/core/cycle/extract-facts.ts"}, {"name": "recall", "ref": "a8ed72600d45fca7894c1abff3c1e78b83b49cc9", "tests": "test/recall-all-local.serial.test.ts test/cli-flag-validation.test.ts", "baseline_tests": "test/recall-all-local.serial.test.ts", "revert": "src/commands/recall.ts"}]
+        include: [{"name": "transcripts", "ref": "e90f4be4759b38328dfd4bb426b2cca1ab30a1fa", "tests": "test/transcripts-codex-record-provenance.test.ts test/codex-hook-lane.test.ts test/codex-hook-lane-archived.test.ts test/transcript-adapters.test.ts test/transcripts-codex-subagent.test.ts test/transcripts-recover-codex.test.ts test/codex-rollout-0154.serial.test.ts test/claude-code-jsonl.test.ts", "baseline_tests": "test/transcripts-codex-record-provenance.test.ts", "revert": "src/core/transcripts/codex.ts src/core/transcripts/codex-hook-lane.ts src/core/transcripts/claude-code-jsonl.ts src/core/context/entity-salience.ts"}, {"name": "maintenance", "ref": "b373f399b523782c203877a9dba04f9d489d648e", "tests": "test/dream-bounded-phases.test.ts test/extract-facts-concurrency.test.ts test/extract-facts-concurrency-walk.serial.test.ts test/cycle-last-full-cycle-at.test.ts test/cycle-stamp-write-failure.test.ts test/dream-dir-source-stamp.test.ts test/dream-env-source-scope.test.ts test/dream.test.ts test/cycle-consolidate.test.ts test/cycle-consolidate-enabled-6667.test.ts test/cycle-consolidate-threshold-5363.test.ts test/extract-facts-phase.test.ts test/extract-facts-poison-page.test.ts", "baseline_tests": "test/dream-bounded-phases.test.ts", "revert": "src/core/cycle/extract-facts.ts"}, {"name": "recall", "ref": "a8ed72600d45fca7894c1abff3c1e78b83b49cc9", "tests": "test/recall-all-local.serial.test.ts test/cli-flag-validation.test.ts", "baseline_tests": "test/recall-all-local.serial.test.ts", "revert": "src/commands/recall.ts"}]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -26,6 +26,9 @@ jobs:
         run: bun install --frozen-lockfile --ignore-scripts > install.log 2>&1
       - name: Bind guard comparisons to reviewed upstream base
         run: git fetch https://github.com/garrytan/gbrain.git 2568d32ac89052dcc8effacd3f96c073e14e44b1:refs/remotes/origin/master
+      - name: Measure standalone native typecheck
+        if: ${{ always() && steps.install.outcome == 'success' }}
+        run: /usr/bin/time -p bun run typecheck > typecheck.log 2>&1
       - name: Native verification battery
         if: ${{ always() && steps.install.outcome == 'success' }}
         env:
@@ -38,6 +41,7 @@ jobs:
         with:
           name: verification-${{ matrix.name }}
           path: |
+            typecheck.log
             verify.log
             verify-logs/
       - name: Focused synthetic regressions
@@ -48,12 +52,7 @@ jobs:
           GBRAIN_SELF_UPGRADE_MODE: 'off'
         # The local registry check took 6.873s; 14s exceeds twice that observation.
         run: env -u DATABASE_URL -u GBRAIN_DATABASE_URL bun test --timeout 14000 ${{ matrix.tests }} > focused.log 2>&1
-      - name: Native unit suite
-        if: ${{ always() && steps.install.outcome == 'success' }}
-        env:
-          GBRAIN_HOME: ${{ runner.temp }}/unit-brain
-          GBRAIN_SELF_UPGRADE_MODE: 'off'
-        run: env -u DATABASE_URL -u GBRAIN_DATABASE_URL bun run test > unit.log 2>&1
+      # Full unit suites run separately in 40266933940 at identical source/test trees.
       - name: Discriminate against baseline source
         if: ${{ always() && steps.focused.outcome == 'success' }}
         env:
@@ -82,6 +81,7 @@ jobs:
           name: proof-${{ matrix.name }}
           path: |
             install.log
+            typecheck.log
             verify.log
             verify-logs/
             focused.log
