@@ -1,0 +1,80 @@
+name: Contribution verification
+on:
+  push:
+    branches: ['codex/contribution-verification']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  proof:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include: [{"name": "recall", "ref": "07b36b2f57d8c6a9268d7756015c3d1b1aba5c1a", "tests": "test/recall-all-local.serial.test.ts test/cli-flag-validation.test.ts", "baseline_tests": "test/recall-all-local.serial.test.ts", "revert": "src/commands/recall.ts"}, {"name": "transcripts", "ref": "b9a0875686fa982b513e805a89e86805e1363c75", "tests": "test/transcripts-codex-record-provenance.test.ts test/codex-hook-lane.test.ts test/codex-hook-lane-archived.test.ts test/transcript-adapters.test.ts test/transcripts-codex-subagent.test.ts test/transcripts-recover-codex.test.ts test/codex-rollout-0154.serial.test.ts test/claude-code-jsonl.test.ts", "baseline_tests": "test/transcripts-codex-record-provenance.test.ts", "revert": "src/core/transcripts/codex.ts src/core/transcripts/codex-hook-lane.ts src/core/transcripts/claude-code-jsonl.ts src/core/context/entity-salience.ts"}]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ matrix.ref }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: '1.4.3'
+      - name: Install locked dependencies
+        id: install
+        run: bun install --frozen-lockfile --ignore-scripts > install.log 2>&1
+      - name: Native verification battery
+        if: ${{ always() && steps.install.outcome == 'success' }}
+        env:
+          GBRAIN_HOME: ${{ runner.temp }}/verify-brain
+          GBRAIN_SELF_UPGRADE_MODE: 'off'
+          GBRAIN_VERIFY_LOG_DIR: ${{ github.workspace }}/verify-logs
+        run: bun run verify > verify.log 2>&1
+      - name: Focused synthetic regressions
+        id: focused
+        if: ${{ always() && steps.install.outcome == 'success' }}
+        env:
+          GBRAIN_HOME: ${{ runner.temp }}/focused-brain
+          GBRAIN_SELF_UPGRADE_MODE: 'off'
+        # The local registry check took 6.873s; 14s exceeds twice that observation.
+        run: env -u DATABASE_URL -u GBRAIN_DATABASE_URL bun test --timeout 14000 ${{ matrix.tests }} > focused.log 2>&1
+      - name: Native unit suite
+        if: ${{ always() && steps.install.outcome == 'success' }}
+        env:
+          GBRAIN_HOME: ${{ runner.temp }}/unit-brain
+          GBRAIN_SELF_UPGRADE_MODE: 'off'
+        run: env -u DATABASE_URL -u GBRAIN_DATABASE_URL bun run test > unit.log 2>&1
+      - name: Discriminate against baseline source
+        if: ${{ always() && steps.focused.outcome == 'success' }}
+        env:
+          GBRAIN_HOME: ${{ runner.temp }}/baseline-brain
+          GBRAIN_SELF_UPGRADE_MODE: 'off'
+        run: |
+          git fetch https://github.com/garrytan/gbrain.git 2568d32ac89052dcc8effacd3f96c073e14e44b1 --depth=1
+          git restore --source=2568d32ac89052dcc8effacd3f96c073e14e44b1 -- ${{ matrix.revert }}
+          set +e
+          env -u DATABASE_URL -u GBRAIN_DATABASE_URL bun test --timeout 14000 ${{ matrix.baseline_tests }} > baseline.log 2>&1
+          code=$?
+          set -e
+          echo "baseline_exit=$code" >> baseline.log
+          python3 - <<'PY_CHECK'
+          import pathlib,re
+          text=pathlib.Path('baseline.log').read_text()
+          assert re.search(r'(^|\n)\s*[1-9][0-9]* fail',text), 'No executed regression failure'
+          assert not re.search(r'(^|\n)\s*[1-9][0-9]* error',text), 'Import crash is not discrimination'
+          PY_CHECK
+      - name: Retain exact revision
+        if: ${{ always() }}
+        run: git rev-parse HEAD > exact-head.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ always() }}
+        with:
+          name: proof-${{ matrix.name }}
+          path: |
+            install.log
+            verify.log
+            verify-logs/
+            focused.log
+            unit.log
+            baseline.log
+            exact-head.txt
