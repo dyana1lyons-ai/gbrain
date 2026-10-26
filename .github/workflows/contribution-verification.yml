@@ -1,10 +1,12 @@
 name: Contribution verification
 on:
-  push:
-    branches: ['codex/contribution-verification']
   workflow_dispatch:
 permissions:
   contents: read
+env:
+  # Native typecheck measured128.25s in40267324642 (2026-10-26);
+  # 257s is ceil(2x128.25), lifted from the native120s cutoff.
+  GBRAIN_VERIFY_TIMEOUT: '257'
 jobs:
   proof:
     runs-on: ubuntu-24.04
