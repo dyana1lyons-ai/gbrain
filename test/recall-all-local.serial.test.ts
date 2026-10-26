@@ -1,5 +1,9 @@
+// Contract: exact local recall certifies only active sources and complete, eligible,
+// redacted output. Ranking tests miss pagination boundaries and trust metadata
+// appended after row projection, so exercise the native engine and final JSON.
 import { beforeAll, afterAll, describe, test, expect } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
+import { withWriteTrust } from '../src/core/persistence/context.ts';
 import { runRecall } from '../src/commands/recall.ts';
 
 let engine: PGLiteEngine;
@@ -35,6 +39,30 @@ describe('complete exact-entity recall', () => {
   test('empty exact entity never broadens to a text match', async () => {
     const out = await capture(['Record', '--source', 'default', '--json', '--all']);
     expect(out.complete).toBe(true); expect(out.facts).toEqual([]);
+  });
+  test('unknown and archived sources are refused instead of certified empty', async () => {
+    await engine.executeRaw('INSERT INTO sources (id, name, archived) VALUES ($1, $1, true)', ['archived-example']);
+    for (const source of ['missing-example', 'archived-example']) {
+      await expect(capture(['cases/example', '--source', source, '--all', '--json'])).rejects.toThrow('not found or is archived');
+    }
+  });
+  test('trust metadata is redacted after stamping while the output shape is retained', async () => {
+    const synthetic = ['AKIA', 'Q7Z2', 'V8R4', 'M6N9', 'P3T5'].join('');
+    const inserted = await engine.transaction(tx => withWriteTrust(tx, {
+      tier: 'agent_written', origin: { channel: synthetic },
+    }, () => tx.insertFact({ fact: 'Metadata screening fixture', kind: 'fact',
+      entity_slug: 'cases/redaction-example', source: 'test', visibility: 'world',
+      context: 'Synthetic context', attributed_to: 'assistant',
+    }, { source_id: 'default' })));
+    const out = await capture(['cases/redaction-example', '--source', 'default', '--all', '--json']);
+    expect(out.complete).toBe(true); expect(out.total).toBe(1);
+    expect(out.facts[0]).toMatchObject({ fact: 'Metadata screening fixture', source_id: 'default',
+      fact_id: String(inserted.id), provenance: 'test', context: 'Synthetic context',
+      attributed_to: 'assistant', trust_tier: 'agent_written',
+    });
+    expect(typeof out.facts[0].origin).toBe('string');
+    expect(out.facts[0].origin).not.toContain(synthetic);
+    expect(JSON.stringify(out)).not.toContain(synthetic);
   });
   test('explicit source and unambiguous complete mode are required', async () => {
     for (const args of [ ['cases/example','--all','--json'], ['cases/example','--source','default','--all'], ['cases/example','--source','default','--all','--json','--question','a question'], ['cases/example','--source','default','--all','--json','--since','1d'] ]) {

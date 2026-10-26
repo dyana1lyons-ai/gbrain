@@ -348,7 +348,7 @@ async function runRecallAll(engine: BrainEngine, flags: ParsedFlags): Promise<vo
     throw usageError('--all requires a local engine; remote recall cannot certify complete enumeration.',
       'Run this read on the brain host.');
   }
-  const sourceId = await resolveSourceForRecall(engine, flags.source, false, true);
+  const sourceId = await resolveSourceId(engine, flags.source);
   const { resolveReadEligibility } = await import('../core/eligibility/policy.ts');
   const { stampRowTrust } = await import('../core/eligibility/stamp.ts');
   const { redactRetrievalOutput } = await import('../core/search/output-redaction.ts');
@@ -369,10 +369,10 @@ async function runRecallAll(engine: BrainEngine, flags: ParsedFlags): Promise<vo
       }
       if (page.length < 100) break;
     }
-    const safe = redactRetrievalOutput([{ facts: rows.map(row => ({ ...row, fact: row.fact, context: row.context, source: row.source })) }], {}, { uncapped: true }).results[0].facts;
-    return stampRowTrust(engine, 'facts', safe.map(row => ({ ...factRowToJson(row), source_id: row.source_id,
+    const stamped = await stampRowTrust(engine, 'facts', rows.map(row => ({ ...factRowToJson(row), source_id: row.source_id,
       fact_id: String(row.id), provenance: row.source, context: row.context,
       ...(row.attributed_to ? { attributed_to: row.attributed_to } : {}) })), row => row.fact_id);
+    return redactRetrievalOutput([{ facts: stamped }], {}, { uncapped: true }).results[0].facts;
   };
   const first = await scan();
   const second = await scan();
